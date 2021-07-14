@@ -93,13 +93,12 @@ template< int N >
 DEVICE_FUNCTION void from_float(int (&dst)[N], const float (&src)[2*N]) {
     // Convert from two f32s to two f16s (mantissa LSB rounds to nearest even)
     // (From 64-bit to 32-bit)
+    half *dst_ = (half *) dst;
     #pragma unroll
     for (int i = 0; i < N; ++i) {
 #ifdef __HIP_PLATFORM_HCC__
-        half *dst_ = (half *) dst;
-        auto res = __builtin_amdgcn_cvt_pkrtz(src[2*i], src[2*i+1]);
-        dst_[2*i] = res[0];
-        dst_[2*i+1] = res[1];
+        dst_[2*i] = __float2half(src[2*i]);
+        dst_[2*i+1] = __float2half(src[2*i+1]);
 #else
         uint16_t lo, hi;
         asm volatile("cvt.rn.f16.f32 %0, %1;" : "=h"(lo) : "f"(src[2*i+0]));
@@ -237,7 +236,11 @@ DEVICE_FUNCTION void stg(uint16_t *gmem, int (&src)[2]) {
 
 DEVICE_FUNCTION void stg_stream(uint16_t *gmem, int (&src)[2]) {
 #ifdef __HIP_PLATFORM_HCC__
-    reinterpret_cast<int2*>(gmem)[0] = make_int2(src[0], src[1]);
+    half *gmem_ = (half *) gmem;
+    half *src_ = (half *) src;
+    for (int i = 0; i < 4; i++) {
+      gmem_[i] = src_[i];
+    }
 #else
     asm volatile ("st.global.cs.v2.s32 [%0], {%1,%2};"
         :: "l"((uint *)gmem) , "r"(src[0]), "r"( src[1]));
@@ -261,6 +264,18 @@ DEVICE_FUNCTION void stg_stream(uint16_t *gmem, float (&src)[N]) {
     from_float(tmp, src);
     stg_stream(gmem, tmp);
 }
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+#ifdef __HIP_PLATFORM_HCC__
+DEVICE_FUNCTION void stg_stream(uint16_t *gmem, float (&src)[4]) {
+    half *gmem_ = (half *) gmem;
+    gmem_[0] = __float2half(src[0]);
+    gmem_[1] = __float2half(src[1]);
+    gmem_[2] = __float2half(src[2]);
+    gmem_[3] = __float2half(src[3]);
+}
+#endif
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
